@@ -1,0 +1,59 @@
+# Example Test Routine Configuration
+# This is a vision for future functionality - test routines that can be saved/loaded
+
+"""
+Tank Fill Test Routine
+Tests valve control and level simulation for Tank_001
+"""
+
+test_routine:
+  name: "Tank_001_Fill_Test"
+  description: "Simulate filling Tank_001 with Valve_001 and FT_001"
+  
+  devices:
+    - name: "Valve_001"
+      type: "valve"
+      tags:
+        command: "Valve_001.out_cv"
+        open_limit: "Valve_001.inp_simZSO"
+        closed_limit: "Valve_001.inp_simZSC"
+    
+    - name: "FT_001" 
+      type: "flow_transmitter"
+      tags:
+        flow_value: "FT_001.inp_sim"
+    
+    - name: "LT_Tank_001"
+      type: "level_transmitter"
+      tags:
+        level_value: "LT_Tank_001.inp_sim"
+      properties:
+        tank_capacity: 1000  # gallons
+        tank_area: 50  # sq ft
+  
+  simulation_logic:
+    - condition: "Valve_001.out_cv > 0"  # Valve commanded open
+      actions:
+        - set: "Valve_001.inp_simZSO = True"
+        - set: "Valve_001.inp_simZSC = False"
+        - set: "FT_001.inp_sim = 200.0"  # 200 GPM
+        - increment: "LT_Tank_001.inp_sim += (200 / 60) / 50"  # Flow / area
+    
+    - condition: "Valve_001.out_cv == 0"  # Valve commanded closed
+      actions:
+        - set: "Valve_001.inp_simZSO = False"
+        - set: "Valve_001.inp_simZSC = True"  
+        - set: "FT_001.inp_sim = 0.0"
+    
+    - condition: "LT_Tank_001.inp_sim >= 100"  # Tank full
+      actions:
+        - set: "FT_001.inp_sim = 0.0"
+        - alarm: "Tank at maximum level"
+  
+  test_steps:
+    1. "Enable simulation for all devices"
+    2. "Set initial level to 10%"
+    3. "Open valve and verify flow starts"
+    4. "Monitor level increase over 60 seconds"
+    5. "Close valve at 80% and verify flow stops"
+    6. "Disable simulation"
