@@ -47,29 +47,25 @@ class PLCConnection:
             self.connected = False
             logger.info("Disconnected from PLC")
     
-    def read_tag(self, tag_name: str) -> Optional[Any]:
-        """
-        Read a single tag value
-        
-        Args:
-            tag_name: Name of the tag to read
-            
-        Returns:
-            Tag value or None if read fails
-        """
+    def read_tags(self, tag_names: list) -> dict:
         if not self.connected:
-            logger.error("Not connected to PLC")
-            return None
-        
+            return {}
         try:
-            result = self.plc.read(tag_name)
-            if result.error:
-                logger.error(f"Error reading {tag_name}: {result.error}")
-                return None
-            return result.value
+            results = self.plc.read(*tag_names)
+            # pycomm3 returns a single object (not a list) when reading one tag
+            if not isinstance(results, list):
+                results = [results]
+            tag_values = {}
+            for tag_name, result in zip(tag_names, results):
+                if not result.error:
+                    tag_values[tag_name] = result.value
+                else:
+                    logger.error(f"Error reading {tag_name}: {result.error}")
+                    tag_values[tag_name] = None
+            return tag_values
         except Exception as e:
-            logger.error(f"Exception reading {tag_name}: {e}")
-            return None
+            logger.error(f"Exception reading tags: {e}")
+            return {}
     
     def write_tag(self, tag_name: str, value: Any) -> bool:
         """
