@@ -1,0 +1,22 @@
+{
+  "name": "Module 1",
+  "description": "",
+  "sim_tags": [
+    "SimValue"
+  ],
+  "input_tags": [
+    {
+      "tag": "TestStart",
+      "alias": "Start"
+    }
+  ],
+  "output_tags": [
+    {
+      "tag": "TestVal",
+      "alias": "Val"
+    }
+  ],
+  "init_script": "# One-time setup script\n# Read inputs and set initial output values\nVal = -100",
+  "loop_script": "# Loop script - runs every interval\n# Use aliases to read/write tags\nif Start:\n    Val = Val + 10",
+  "interval_seconds": 1.0
+}

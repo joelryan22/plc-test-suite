@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QColor
 from plc_test_suite.plc_connection import PLCConnection
+from plc_test_suite.sim_tab import SimulationTab
 
 # Configure logging
 logging.basicConfig(
@@ -39,7 +40,7 @@ class PLCTestSuiteGUI(QMainWindow):
     def init_ui(self):
         """Initialize the user interface"""
         self.setWindowTitle("PLC Test Suite - PlantPAx Simulation Tool")
-        self.setGeometry(100, 100, 1000, 700)
+        self.setGeometry(100, 100, 1280, 820)
         
         # Create central widget and main layout
         central_widget = QWidget()
@@ -61,9 +62,9 @@ class PLCTestSuiteGUI(QMainWindow):
         quick_write_tab = self.create_quick_write_tab()
         tab_widget.addTab(quick_write_tab, "Quick Write")
         
-        # Simulation Control tab
-        sim_control_tab = self.create_simulation_control_tab()
-        tab_widget.addTab(sim_control_tab, "Simulation Control")
+        # Simulation Modules tab (new)
+        self.sim_tab = SimulationTab(self.plc)
+        tab_widget.addTab(self.sim_tab, "Simulation Modules")
         
         main_layout.addWidget(tab_widget)
         
@@ -426,6 +427,7 @@ class PLCTestSuiteGUI(QMainWindow):
     
     def closeEvent(self, event):
         """Handle application close"""
+        self.sim_tab.stop_all()
         if self.plc.connected:
             self.plc.disconnect()
         event.accept()

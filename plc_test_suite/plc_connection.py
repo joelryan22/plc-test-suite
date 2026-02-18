@@ -97,9 +97,20 @@ class PLCConnection:
             logger.error(f"Exception writing {tag_name}: {e}")
             return False
     
-    def read_tags(self, tag_names: list) -> dict:
+    def read_tags(self, tag_names: List[str]) -> Dict[str, Any]:
+        """
+        Read multiple tags at once
+        
+        Args:
+            tag_names: List of tag names to read
+            
+        Returns:
+            Dictionary mapping tag names to values
+        """
         if not self.connected:
+            logger.error("Not connected to PLC")
             return {}
+        
         try:
             results = self.plc.read(*tag_names)
             # pycomm3 returns a single object (not a list) when reading one tag
@@ -133,6 +144,9 @@ class PLCConnection:
         
         try:
             results = self.plc.write(*tag_value_pairs)
+            # pycomm3 returns a single object (not a list) when writing one tag
+            if not isinstance(results, list):
+                results = [results]
             all_success = True
             for (tag_name, _), result in zip(tag_value_pairs, results):
                 if result.error:

@@ -20,7 +20,7 @@ A GUI-based testing tool for Allen-Bradley PlantPAx simulations using EtherNet/I
 ### Method 1: Install from GitHub (Recommended for team distribution)
 
 ```bash
-pip install git+https://github.com/joelryan22/plc-test-suite.git
+pip install git+https://github.com/yourusername/plc-test-suite.git
 ```
 
 Then run:
@@ -32,7 +32,7 @@ plc-test-suite
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/joelryan22/plc-test-suite.git
+git clone https://github.com/yourusername/plc-test-suite.git
 cd plc-test-suite
 ```
 
@@ -171,11 +171,11 @@ The executable will be in `dist/PLC-Test-Suite.exe`
 
 ## License
 
-Internal tool - no standard licensing.
+Internal tool - proprietary to [Your Company]
 
 ## Support
 
-There is none (for now).
+For issues or feature requests, contact [your-email@company.com]
 
 ## Acknowledgments
 
