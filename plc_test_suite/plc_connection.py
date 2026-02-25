@@ -43,9 +43,14 @@ class PLCConnection:
     def disconnect(self):
         """Disconnect from the PLC"""
         if self.plc:
-            self.plc.close()
-            self.connected = False
-            logger.info("Disconnected from PLC")
+            try:
+                self.plc.close()
+            except Exception as e:
+                # Connection may already be broken - that's fine
+                logger.warning(f"Error during disconnect (connection may already be closed): {e}")
+            finally:
+                self.connected = False
+                logger.info("Disconnected from PLC")
     
     def read_tags(self, tag_names: list) -> dict:
         if not self.connected:
