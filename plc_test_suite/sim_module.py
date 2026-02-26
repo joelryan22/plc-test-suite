@@ -16,6 +16,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Callable
 from pathlib import Path
+from plc_test_suite.user_inputs import UserInput
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class SimModule:
     sim_tags: List[str] = field(default_factory=list)
     input_tags: List[TagEntry] = field(default_factory=list)
     output_tags: List[TagEntry] = field(default_factory=list)
+    user_inputs: List[UserInput] = field(default_factory=list)  # NEW LINE
     init_script: str = "# One-time setup script\n# Read inputs and set initial output values\n"
     loop_script: str = "# Loop script - runs every interval\n# Use aliases to read/write tags\n"
     interval_seconds: float = 1.0
@@ -62,6 +64,9 @@ class SimModule:
             "sim_tags": self.sim_tags,
             "input_tags": [{"tag": t.tag, "alias": t.alias} for t in self.input_tags],
             "output_tags": [{"tag": t.tag, "alias": t.alias} for t in self.output_tags],
+            "user_inputs": [{"alias": u.alias, "input_type": u.input_type, "label": u.label, 
+                            "default_value": u.default_value, "min_val": u.min_val, "max_val": u.max_val} 
+                            for u in self.user_inputs],  # NEW LINE
             "init_script": self.init_script,
             "loop_script": self.loop_script,
             "interval_seconds": self.interval_seconds,
@@ -75,6 +80,7 @@ class SimModule:
             sim_tags=data.get("sim_tags", []),
             input_tags=[TagEntry(**t) for t in data.get("input_tags", [])],
             output_tags=[TagEntry(**t) for t in data.get("output_tags", [])],
+            user_inputs=[UserInput(**u) for u in data.get("user_inputs", [])],  # Defaults to [] if key missing
             init_script=data.get("init_script", ""),
             loop_script=data.get("loop_script", ""),
             interval_seconds=data.get("interval_seconds", 1.0),
@@ -157,6 +163,10 @@ class SimEngine:
         self._log(f"Module running (interval: {self.module.interval_seconds}s)")
         return True
 
+    def set_user_input_callback(self, callback):
+        """Set callback to get current user input values"""
+        self._user_input_callback = callback
+
     def stop(self):
         """Stop the loop and disable sim tags."""
         self._running = False
@@ -185,6 +195,11 @@ class SimEngine:
 
             # Re-read inputs into namespace
             self._refresh_inputs()
+            
+            # Inject user input values into namespace  # NEW
+            if hasattr(self, '_user_input_callback'):  # NEW
+                user_vals = self._user_input_callback()  # NEW
+                self._script_ns.update(user_vals)  # NEW
 
             # Execute loop script
             if self.module.loop_script.strip():

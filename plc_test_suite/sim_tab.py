@@ -12,13 +12,15 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QGroupBox, QListWidget, QListWidgetItem,
     QFileDialog, QMessageBox, QDoubleSpinBox, QTextEdit,
-    QPlainTextEdit, QTabWidget, QFrame
+    QPlainTextEdit, QTabWidget, QFrame, QComboBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 
 from plc_test_suite.sim_module import SimModule, SimEngine, TagEntry
 from plc_test_suite.syntax_highlighter import PythonHighlighter
+
+from plc_test_suite.user_inputs import UserInput, UserInputsPanel
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +264,107 @@ class ModuleEditorWidget(QWidget):
         loop_layout.addWidget(self.loop_editor)
         script_tabs.addTab(loop_widget, "Loop Script")
 
+        # User Inputs tab
+        user_inputs_widget = QWidget()
+        user_inputs_layout = QVBoxLayout(user_inputs_widget)
+        user_inputs_layout.addWidget(QLabel(
+            "User Inputs — Interactive controls you can change while simulation runs"))
+        
+        # List of current user inputs with edit/delete
+        inputs_group = QGroupBox("Current User Inputs")
+        inputs_group_layout = QVBoxLayout(inputs_group)
+        
+        self.user_inputs_list = QListWidget()
+        self.user_inputs_list.setMaximumHeight(120)
+        inputs_group_layout.addWidget(self.user_inputs_list)
+        
+        list_buttons = QHBoxLayout()
+        edit_input_btn = QPushButton("Edit Selected")
+        edit_input_btn.clicked.connect(self._edit_user_input)
+        list_buttons.addWidget(edit_input_btn)
+        
+        delete_input_btn = QPushButton("Delete Selected")
+        delete_input_btn.clicked.connect(self._delete_user_input)
+        list_buttons.addWidget(delete_input_btn)
+        list_buttons.addStretch()
+        
+        inputs_group_layout.addLayout(list_buttons)
+        user_inputs_layout.addWidget(inputs_group)
+        
+        # Live controls panel
+        controls_group = QGroupBox("Live Controls (active during simulation)")
+        controls_layout = QVBoxLayout(controls_group)
+        self.user_inputs_panel = UserInputsPanel()
+        controls_layout.addWidget(self.user_inputs_panel)
+        user_inputs_layout.addWidget(controls_group)
+        
+        # Add new user input
+        add_group = QGroupBox("Add New User Input")
+        add_layout = QVBoxLayout(add_group)
+        
+        add_input_layout = QHBoxLayout()
+        add_input_layout.addWidget(QLabel("Alias:"))
+        self.input_alias_edit = QLineEdit()
+        self.input_alias_edit.setPlaceholderText("e.g. manual_mode")
+        add_input_layout.addWidget(self.input_alias_edit)
+        
+        add_input_layout.addWidget(QLabel("Type:"))
+        self.input_type_combo = QComboBox()
+        self.input_type_combo.addItems(["float", "int", "momentary", "toggle"])
+        add_input_layout.addWidget(self.input_type_combo)
+        
+        add_input_layout.addWidget(QLabel("Label:"))
+        self.input_label_edit = QLineEdit()
+        self.input_label_edit.setPlaceholderText("e.g. Manual Mode")
+        add_input_layout.addWidget(self.input_label_edit)
+        
+        add_layout.addLayout(add_input_layout)
+        
+        add_input_btn = QPushButton("Add Input")
+        add_input_btn.clicked.connect(self._add_user_input)
+        add_layout.addWidget(add_input_btn)
+        
+        user_inputs_layout.addWidget(add_group)
+        
+        script_tabs.addTab(user_inputs_widget, "User Inputs")
+
         layout.addWidget(script_tabs)
+
+    def _add_user_input(self):
+        """Add a user input control"""
+        alias = self.input_alias_edit.text().strip()
+        label = self.input_label_edit.text().strip()
+        input_type = self.input_type_combo.currentText()
+        
+        if not alias or not label:
+            QMessageBox.warning(self, "Missing Info", "Please enter alias and label")
+            return
+        
+        # Determine default value based on type
+        if input_type in ['float', 'int']:
+            default_value = 0.0 if input_type == 'float' else 0
+        else:
+            default_value = False
+        
+        user_input = UserInput(
+            alias=alias,
+            input_type=input_type,
+            label=label,
+            default_value=default_value
+        )
+        
+        # Get current inputs from the loaded module and append
+        if not hasattr(self, '_module') or self._module is None:
+            self._module = SimModule()
+        
+        self._module.user_inputs.append(user_input)  # Append to existing list
+        
+        # Reload to refresh display
+        self.user_inputs_panel.set_inputs(self._module.user_inputs)
+        
+        # Clear input fields
+        self.input_alias_edit.clear()
+        self.input_label_edit.clear()
 
     def load_module(self, module: SimModule):
         """Populate UI from a SimModule"""
@@ -273,21 +375,119 @@ class ModuleEditorWidget(QWidget):
         self.sim_tags_widget.load_tags(module.sim_tags)
         self.input_tags_widget.load_entries(module.input_tags)
         self.output_tags_widget.load_entries(module.output_tags)
+        self._refresh_user_inputs_list()
+        self.user_inputs_panel.set_inputs(module.user_inputs)
         self.init_editor.setPlainText(module.init_script)
         self.loop_editor.setPlainText(module.loop_script)
 
     def collect_module(self) -> SimModule:
         """Build and return a SimModule from current UI state"""
+        # Get user inputs from the module if it exists, otherwise empty list
+        if hasattr(self, '_module') and self._module and hasattr(self._module, 'user_inputs'):
+            user_inputs = self._module.user_inputs
+        else:
+            user_inputs = []
+        
         return SimModule(
             name=self.name_edit.text().strip() or "Unnamed",
             description=self.desc_edit.text().strip(),
             sim_tags=self.sim_tags_widget.get_tags(),
             input_tags=self.input_tags_widget.get_entries(),
             output_tags=self.output_tags_widget.get_entries(),
+            user_inputs=user_inputs,
             init_script=self.init_editor.toPlainText(),
             loop_script=self.loop_editor.toPlainText(),
             interval_seconds=self.interval_spin.value(),
         )
+
+    def _refresh_user_inputs_list(self):
+        """Refresh the list widget showing current user inputs"""
+        self.user_inputs_list.clear()
+        if hasattr(self, '_module') and self._module and self._module.user_inputs:
+            for inp in self._module.user_inputs:
+                self.user_inputs_list.addItem(f"{inp.alias} ({inp.input_type}) - {inp.label}")
+    
+    def _edit_user_input(self):
+        """Edit the selected user input"""
+        current_row = self.user_inputs_list.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "No Selection", "Please select a user input to edit")
+            return
+        
+        if not hasattr(self, '_module') or not self._module:
+            return
+        
+        user_input = self._module.user_inputs[current_row]
+        
+        # Populate edit fields with current values
+        self.input_alias_edit.setText(user_input.alias)
+        self.input_label_edit.setText(user_input.label)
+        self.input_type_combo.setCurrentText(user_input.input_type)
+        
+        # Remove the old one (will be re-added when user clicks Add)
+        self._module.user_inputs.pop(current_row)
+        self._refresh_user_inputs_list()
+        self.user_inputs_panel.set_inputs(self._module.user_inputs)
+    
+    def _delete_user_input(self):
+        """Delete the selected user input"""
+        current_row = self.user_inputs_list.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "No Selection", "Please select a user input to delete")
+            return
+        
+        if not hasattr(self, '_module') or not self._module:
+            return
+        
+        user_input = self._module.user_inputs[current_row]
+        
+        confirm = QMessageBox.question(
+            self, "Delete User Input",
+            f"Delete user input '{user_input.alias}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if confirm == QMessageBox.StandardButton.Yes:
+            self._module.user_inputs.pop(current_row)
+            self._refresh_user_inputs_list()
+            self.user_inputs_panel.set_inputs(self._module.user_inputs)
+    
+    def _add_user_input(self):
+        """Add a user input control"""
+        alias = self.input_alias_edit.text().strip()
+        label = self.input_label_edit.text().strip()
+        input_type = self.input_type_combo.currentText()
+        
+        if not alias or not label:
+            QMessageBox.warning(self, "Missing Info", "Please enter alias and label")
+            return
+        
+        # Determine default value based on type
+        if input_type in ['float', 'int']:
+            default_value = 0.0 if input_type == 'float' else 0
+        else:
+            default_value = False
+        
+        user_input = UserInput(
+            alias=alias,
+            input_type=input_type,
+            label=label,
+            default_value=default_value
+        )
+        
+        # Get current inputs from the loaded module and append
+        if not hasattr(self, '_module') or self._module is None:
+            self._module = SimModule()
+        
+        self._module.user_inputs.append(user_input)
+        
+        # Refresh displays
+        self._refresh_user_inputs_list()
+        self.user_inputs_panel.set_inputs(self._module.user_inputs)
+        
+        # Clear input fields
+        self.input_alias_edit.clear()
+        self.input_label_edit.clear()
 
 
 class SimulationTab(QWidget):
@@ -473,6 +673,11 @@ class SimulationTab(QWidget):
 
         module = self._modules[self._current_index]
         self._engine = SimEngine(module, self.plc, log_callback=self._append_log)
+
+        if module.user_inputs:
+            def get_user_input_values():
+                return self.editor.user_inputs_panel.get_values()
+            self._engine.set_user_input_callback(get_user_input_values)
 
         if self._engine.start():
             self.start_btn.setEnabled(False)

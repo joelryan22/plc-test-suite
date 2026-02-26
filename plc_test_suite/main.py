@@ -14,6 +14,7 @@ from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QColor
 from plc_test_suite.plc_connection import PLCConnection
 from plc_test_suite.sim_tab import SimulationTab
+from plc_test_suite.tag_browser import TagBrowserTab
 
 # Configure logging
 logging.basicConfig(
@@ -65,6 +66,10 @@ class PLCTestSuiteGUI(QMainWindow):
         # Simulation Modules tab (new)
         self.sim_tab = SimulationTab(self.plc)
         tab_widget.addTab(self.sim_tab, "Simulation Modules")
+        
+        # Tag Browser tab
+        self.tag_browser_tab = TagBrowserTab(self.plc)
+        tab_widget.addTab(self.tag_browser_tab, "Tag Browser")
         
         main_layout.addWidget(tab_widget)
         
