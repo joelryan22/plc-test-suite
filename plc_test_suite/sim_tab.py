@@ -249,6 +249,7 @@ class ModuleEditorWidget(QWidget):
         init_layout.addWidget(QLabel(
             "Init Script — runs once at startup. Read inputs, set initial output values."))
         self.init_editor = ScriptEditor()
+        self.init_editor.setMinimumHeight(200)  # Add this line
         self.init_editor.setPlaceholderText(
             "# Example:\n# tank_level = 0.0\n# flow = 0.0\n")
         init_layout.addWidget(self.init_editor)
@@ -259,6 +260,7 @@ class ModuleEditorWidget(QWidget):
         loop_layout.addWidget(QLabel(
             "Loop Script — runs every interval. Use aliases to read inputs and write outputs."))
         self.loop_editor = ScriptEditor()
+        self.loop_editor.setMinimumHeight(200)
         self.loop_editor.setPlaceholderText(
             "# Example:\n# if valve_cmd > 0:\n#     flow = 200.0\n#     tank_level += 1.5\n# else:\n#     flow = 0.0\n")
         loop_layout.addWidget(self.loop_editor)
@@ -542,9 +544,9 @@ class SimulationTab(QWidget):
         right_layout = QVBoxLayout(right_panel)
 
         self.editor = ModuleEditorWidget()
-        right_layout.addWidget(self.editor, stretch=3)
+        right_layout.addWidget(self.editor, stretch=5)  # Give editor MORE space
 
-        # Run controls
+        # Run controls - keep compact
         run_group = QGroupBox("Run Controls")
         run_layout = QHBoxLayout(run_group)
 
@@ -566,9 +568,16 @@ class SimulationTab(QWidget):
 
         right_layout.addWidget(run_group)
 
-        # Live log
-        log_group = QGroupBox("Execution Log")
-        log_layout = QVBoxLayout(log_group)
+        # Collapsible log
+        self.log_toggle_btn = QPushButton("▼ Execution Log")
+        self.log_toggle_btn.setCheckable(True)
+        self.log_toggle_btn.setChecked(True)
+        self.log_toggle_btn.clicked.connect(self._toggle_log)
+        right_layout.addWidget(self.log_toggle_btn)
+
+        self.log_group = QGroupBox()
+        log_layout = QVBoxLayout(self.log_group)
+        log_layout.setContentsMargins(5, 5, 5, 5)
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setMaximumHeight(140)
@@ -578,12 +587,21 @@ class SimulationTab(QWidget):
         clear_log_btn.setMaximumWidth(100)
         clear_log_btn.clicked.connect(self.log_output.clear)
         log_layout.addWidget(clear_log_btn)
-        right_layout.addWidget(log_group)
+        right_layout.addWidget(self.log_group, stretch=1)  # Less space for log
 
         outer.addWidget(right_panel, stretch=1)
 
         # Start with one blank module
         self._new_module()
+
+    def _toggle_log(self):
+        """Toggle execution log visibility"""
+        if self.log_toggle_btn.isChecked():
+            self.log_group.show()
+            self.log_toggle_btn.setText("▼ Execution Log")
+        else:
+            self.log_group.hide()
+            self.log_toggle_btn.setText("▶ Execution Log (collapsed)")
 
     # ------------------------------------------------------------------
     # Module list management
