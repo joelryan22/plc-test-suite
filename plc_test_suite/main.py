@@ -37,6 +37,11 @@ class PLCTestSuiteGUI(QMainWindow):
         # Auto-refresh timer (disabled by default)
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.refresh_tags)
+
+        # Heartbeat timer
+        self.heartbeat_timer = QTimer()
+        self.heartbeat_timer.timeout.connect(self._update_heartbeat)
+        self.heartbeat_value = 0
         
     def init_ui(self):
         """Initialize the user interface"""
@@ -81,25 +86,39 @@ class PLCTestSuiteGUI(QMainWindow):
     def create_connection_section(self) -> QGroupBox:
         """Create PLC connection controls"""
         group = QGroupBox("PLC Connection")
-        layout = QHBoxLayout()
+        layout = QVBoxLayout()  # Change to VBoxLayout to stack rows
+        
+        # First row - IP address and connect button
+        ip_row = QHBoxLayout()
         
         # IP Address input
-        layout.addWidget(QLabel("PLC IP Address:"))
+        ip_row.addWidget(QLabel("PLC IP Address:"))
         self.ip_input = QLineEdit()
         self.ip_input.setPlaceholderText("192.168.1.10")
         self.ip_input.setText("192.168.1.10")  # Default for testing
-        layout.addWidget(self.ip_input)
+        ip_row.addWidget(self.ip_input)
         
         # Connect button
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self.toggle_connection)
-        layout.addWidget(self.connect_btn)
+        ip_row.addWidget(self.connect_btn)
         
         # Connection status
         self.connection_status = QLabel("⚫ Disconnected")
-        layout.addWidget(self.connection_status)
+        ip_row.addWidget(self.connection_status)
         
-        layout.addStretch()
+        ip_row.addStretch()
+        layout.addLayout(ip_row)
+        
+        # Second row - Heartbeat tag (NEW)
+        heartbeat_row = QHBoxLayout()
+        heartbeat_row.addWidget(QLabel("Heartbeat Tag:"))
+        self.heartbeat_input = QLineEdit()
+        self.heartbeat_input.setPlaceholderText("Optional - e.g., PLC_Heartbeat (cycles 0-100)")
+        heartbeat_row.addWidget(self.heartbeat_input)
+        heartbeat_row.addStretch()
+        layout.addLayout(heartbeat_row)
+        
         group.setLayout(layout)
         return group
     
@@ -267,11 +286,13 @@ class PLCTestSuiteGUI(QMainWindow):
                 self.connection_status.setText("🟢 Connected")
                 self.connection_status.setStyleSheet("color: green;")
                 self.update_status(f"Connected to {ip_address}")
+                self._start_heartbeat()  # NEW - Start heartbeat
             else:
                 QMessageBox.critical(self, "Connection Error", 
-                                   f"Failed to connect to PLC at {ip_address}")
+                                f"Failed to connect to PLC at {ip_address}")
                 self.update_status("Connection failed")
         else:
+            self._stop_heartbeat()  # NEW - Stop heartbeat
             self.plc.disconnect()
             self.connect_btn.setText("Connect")
             self.connection_status.setText("⚫ Disconnected")
@@ -280,6 +301,44 @@ class PLCTestSuiteGUI(QMainWindow):
             if self.auto_refresh:
                 self.toggle_auto_refresh()
     
+    def _update_heartbeat(self):
+        """Update heartbeat tag value (cycles 0-100)"""
+        heartbeat_tag = self.heartbeat_input.text().strip()
+        
+        if not heartbeat_tag:
+            return  # No heartbeat tag configured
+        
+        if not self.plc.connected:
+            return  # Not connected
+        
+        try:
+            # Write current heartbeat value
+            self.plc.write_tag(heartbeat_tag, self.heartbeat_value)
+            
+            # Increment and wrap around
+            self.heartbeat_value += 1
+            if self.heartbeat_value > 100:
+                self.heartbeat_value = 0
+                
+        except Exception as e:
+            # Don't spam errors if heartbeat fails
+            logger.debug(f"Heartbeat write failed: {e}")
+
+    def _start_heartbeat(self):
+        """Start the heartbeat timer"""
+        heartbeat_tag = self.heartbeat_input.text().strip()
+        
+        if heartbeat_tag:
+            self.heartbeat_value = 0
+            self.heartbeat_timer.start(1000)  # Update every 1 second
+            logger.info(f"Started heartbeat on tag: {heartbeat_tag}")
+
+    def _stop_heartbeat(self):
+        """Stop the heartbeat timer"""
+        if self.heartbeat_timer.isActive():
+            self.heartbeat_timer.stop()
+            logger.info("Stopped heartbeat")
+
     def add_tag_to_monitor(self):
         """Add a tag to the monitoring table"""
         tag_name = self.tag_name_input.text().strip()
@@ -432,6 +491,7 @@ class PLCTestSuiteGUI(QMainWindow):
     
     def closeEvent(self, event):
         """Handle application close"""
+        self._stop_heartbeat()  # NEW - Stop heartbeat
         self.sim_tab.stop_all()
         if self.plc.connected:
             self.plc.disconnect()
