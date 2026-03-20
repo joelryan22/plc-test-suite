@@ -17,7 +17,11 @@ A GUI-based testing tool for Allen-Bradley PlantPAx simulations using EtherNet/I
 - Allen-Bradley PLC with EtherNet/IP communication
 - Network access to the PLC
 
-### Method 1: Install from GitHub (Recommended for team distribution)
+### Method 1: Standalone Executable
+
+Download the pre-built executable from the Releases page.
+
+### Method 2: Install from GitHub (Recommended for team distribution)
 
 ```bash
 pip install git+https://github.com/joelryan22/plc-test-suite.git
@@ -28,7 +32,7 @@ Then run:
 plc-test-suite
 ```
 
-### Method 2: Local Development Installation
+### Method 3: Local Development Installation
 
 1. Clone the repository:
 ```bash
@@ -45,10 +49,6 @@ pip install -e .
 ```bash
 plc-test-suite
 ```
-
-### Method 3: Standalone Executable (Coming Soon)
-
-For non-technical users, download the pre-built executable from the Releases page.
 
 ## Usage
 
