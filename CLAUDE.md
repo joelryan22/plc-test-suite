@@ -250,6 +250,8 @@ finally:
       whitelisted modules), Jedi hover help/signatures
 - [x] Compile-only syntax checking (live error markers + pre-run gate before PLC writes)
 - [x] Whitelisted `math` / `time` / `random` available in scripts
+- [x] Scripts can end the simulation gracefully via `stop("reason")` (disables sim
+      tags and resets the UI, same as the Stop button)
 - [x] Collapsible execution log
 - [x] Optional heartbeat tag for connection status
 - [x] Error handling (graceful disconnect, protected UDTs)

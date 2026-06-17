@@ -50,15 +50,52 @@ def test_syntax_check_is_compile_only(app):
     assert ok is True
 
 
+class _DummyPLC:
+    def __init__(self):
+        self.writes = []
+
+    def read_tags(self, names):
+        return {}
+
+    def write_tags(self, pairs):
+        self.writes.append(pairs)
+        return True
+
+
 def test_namespace_includes_whitelisted_modules():
     import types
     from plc_test_suite.sim_module import SimModule, SimEngine
-
-    class _DummyPLC:
-        def read_tags(self, names):
-            return {}
 
     engine = SimEngine(SimModule(), _DummyPLC())
     ns = engine._build_namespace()
     for mod in ("math", "time", "random"):
         assert isinstance(ns[mod], types.ModuleType)
+
+
+def test_script_can_request_stop():
+    from plc_test_suite.sim_module import SimModule, SimEngine
+
+    engine = SimEngine(SimModule(), _DummyPLC())
+    ns = engine._build_namespace()
+    # stop() is exposed to scripts and requests a graceful shutdown
+    assert callable(ns["stop"]) and callable(ns["stop_simulation"])
+    assert engine._stop_requested is False
+    ns["stop"]("done")
+    assert engine._stop_requested is True
+
+
+def test_finalize_is_idempotent():
+    from plc_test_suite.sim_module import SimModule, SimEngine
+
+    module = SimModule(sim_tags=["Valve.cfg_sim"])
+    plc = _DummyPLC()
+    engine = SimEngine(module, plc)
+    calls = []
+    engine.on_finished = lambda: calls.append(1)
+
+    engine._finalize()
+    engine._finalize()  # second call must be a no-op
+
+    # sim tags disabled exactly once, on_finished fired exactly once
+    assert plc.writes == [[("Valve.cfg_sim", False)]]
+    assert calls == [1]

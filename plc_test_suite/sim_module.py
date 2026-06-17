@@ -123,6 +123,15 @@ class SimEngine:
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
+        # Stop requested from within a script via stop()
+        self._stop_requested = False
+        # Called (with no args) once the engine has fully stopped, so the UI can
+        # reset. May be invoked from the loop thread — keep it thread-safe.
+        self.on_finished: Optional[Callable] = None
+        # Guards the one-time cleanup so button-stop and script-stop don't race
+        self._finalize_lock = threading.Lock()
+        self._finalized = False
+
         # Shared namespace for scripts - persists across loop iterations
         self._script_ns: Dict = {}
 
@@ -168,12 +177,34 @@ class SimEngine:
         self._user_input_callback = callback
 
     def stop(self):
-        """Stop the loop and disable sim tags."""
+        """Stop the loop and disable sim tags (called by the UI / app close)."""
         self._running = False
-        if self._thread:
+        if self._thread and self._thread is not threading.current_thread():
             self._thread.join(timeout=5)
+        self._finalize()
+
+    def _request_stop(self, reason: str = ""):
+        """Injected into scripts as ``stop()``. Requests a graceful shutdown:
+        the loop finishes the current iteration, flushes outputs, then stops."""
+        self._stop_requested = True
+        detail = f": {reason}" if reason else ""
+        self._log(f"Stop requested by script{detail}")
+
+    def _finalize(self):
+        """Idempotent shutdown: disable sim tags, log, and notify the UI.
+        Safe to call from either the loop thread or the UI thread."""
+        with self._finalize_lock:
+            if self._finalized:
+                return
+            self._finalized = True
+        self._running = False
         self._set_sim_tags(False)
         self._log(f"Module stopped: {self.module.name}")
+        if self.on_finished:
+            try:
+                self.on_finished()
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(f"on_finished callback failed: {e}")
 
     @property
     def is_running(self) -> bool:
@@ -190,12 +221,12 @@ class SimEngine:
 
     def _loop(self):
         """Background thread - runs loop_script every interval_seconds"""
-        while self._running:
+        while self._running and not self._stop_requested:
             start = time.time()
 
             # Re-read inputs into namespace
             self._refresh_inputs()
-            
+
             # Inject user input values into namespace  # NEW
             if hasattr(self, '_user_input_callback'):  # NEW
                 user_vals = self._user_input_callback()  # NEW
@@ -205,13 +236,23 @@ class SimEngine:
             if self.module.loop_script.strip():
                 self._exec_script(self.module.loop_script, "loop_script")
 
-            # Flush outputs back to PLC
+            # Flush outputs back to PLC (the final computed values are written
+            # even when the script just requested a stop)
             self._flush_outputs()
+
+            # If the script called stop(), shut down gracefully now
+            if self._stop_requested:
+                break
 
             # Sleep for remainder of interval
             elapsed = time.time() - start
             sleep_time = max(0, self.module.interval_seconds - elapsed)
             time.sleep(sleep_time)
+
+        # If the loop ended because a script requested stop, finalize here
+        # (the UI button path finalizes via stop() instead).
+        if self._stop_requested:
+            self._finalize()
 
     def _build_namespace(self) -> Optional[Dict]:
         """
@@ -230,6 +271,10 @@ class SimEngine:
         import time as _time
         import random
         ns = {"math": math, "time": _time, "random": random}
+
+        # Let scripts request a graceful stop, e.g. `if estop: stop("reason")`
+        ns["stop"] = self._request_stop
+        ns["stop_simulation"] = self._request_stop
 
         if not all_tags:
             return ns
