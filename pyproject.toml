@@ -11,6 +11,8 @@ requires-python = ">=3.8"
 dependencies = [
     "pycomm3>=1.2.0",
     "PyQt6>=6.4.0",
+    "PyQt6-QScintilla>=2.14",
+    "jedi>=0.19",
 ]
 
 [tool.setuptools.packages.find]

@@ -3,6 +3,7 @@ Simulation Module Editor - GUI widget for creating and running simulation module
 """
 
 import json
+import keyword
 import logging
 from pathlib import Path
 from typing import Optional
@@ -12,44 +13,276 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QGroupBox, QListWidget, QListWidgetItem,
     QFileDialog, QMessageBox, QDoubleSpinBox, QTextEdit,
-    QPlainTextEdit, QTabWidget, QFrame, QComboBox
+    QTabWidget, QFrame, QComboBox, QToolTip
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
+from PyQt6.Qsci import QsciScintilla, QsciLexerPython, QsciAPIs, QsciStyle
 
 from plc_test_suite.sim_module import SimModule, SimEngine, TagEntry
-from plc_test_suite.syntax_highlighter import PythonHighlighter
 
 from plc_test_suite.user_inputs import UserInput, UserInputsPanel
 
 logger = logging.getLogger(__name__)
 
 
-class ScriptEditor(QPlainTextEdit):
-    """Code editor with Python syntax highlighting and monospace font"""
+# Stdlib modules pre-injected into the script namespace
+# (kept in sync with SimEngine._build_namespace in sim_module.py)
+WHITELIST_MODULES = ["math", "time", "random"]
+
+# Closing character inserted when the opener is typed
+_AUTO_CLOSE = {"(": ")", "[": "]", "{": "}", '"': '"', "'": "'"}
+
+
+class ScriptEditor(QsciScintilla):
+    """Python code editor backed by QScintilla.
+
+    Features: syntax highlighting, line-number gutter, auto-indent, brace
+    matching, bracket auto-close, alias-aware autocompletion (QsciAPIs),
+    Jedi-powered hover help, and compile-only syntax checking.
+
+    The QPlainTextEdit-style ``setPlainText``/``toPlainText``/
+    ``setPlaceholderText`` methods are shimmed so existing call sites keep
+    working unchanged.
+    """
+
+    # (ok, message, line_number) — emitted after each live syntax check
+    syntax_status = pyqtSignal(bool, str, int)
+
+    _MARKER_ERROR = 8
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._known_names: list[str] = []
+
+        # Jedi is optional — never let it break the editor
+        try:
+            import jedi
+            self._jedi = jedi
+        except Exception:  # pragma: no cover - defensive
+            self._jedi = None
+
         font = QFont("Consolas", 10)
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.setFont(font)
-        self.setStyleSheet("""
-            QPlainTextEdit {
-                background-color: #1E1E1E;
-                color: #D4D4D4;
-                border: 1px solid #3C3C3C;
-                padding: 4px;
-            }
-        """)
-        self.setTabStopDistance(28)  # ~4 spaces width
-        PythonHighlighter(self.document())
+
+        # --- Lexer (syntax highlighting) ---
+        self._lexer = QsciLexerPython(self)
+        self._lexer.setDefaultFont(font)
+        self._lexer.setFont(font)
+        self._apply_theme()
+        self.setLexer(self._lexer)
+
+        # --- Autocompletion (QsciAPIs) ---
+        self._apis = QsciAPIs(self._lexer)
+        self._base_words = self._compute_base_words()
+        self._rebuild_apis()
+        self.setAutoCompletionSource(QsciScintilla.AutoCompletionSource.AcsAPIs)
+        self.setAutoCompletionThreshold(2)
+        self.setAutoCompletionCaseSensitivity(False)
+        self.setAutoCompletionReplaceWord(True)
+
+        # --- Editor behaviour / appearance ---
+        self.setUtf8(True)
+        self.setIndentationsUseTabs(False)
+        self.setTabWidth(4)
+        self.setAutoIndent(True)
+        self.setIndentationGuides(True)
+        self.setBraceMatching(QsciScintilla.BraceMatch.SloppyBraceMatch)
+        self.setCaretLineVisible(True)
+        self.setCaretLineBackgroundColor(QColor("#2A2A2A"))
+        self.setCaretForegroundColor(QColor("#D4D4D4"))
+        self.setMinimumHeight(200)
+
+        # Line-number margin (0) and symbol margin (1) for the error marker
+        self.setMarginType(0, QsciScintilla.MarginType.NumberMargin)
+        self.setMarginWidth(0, "0000")
+        self.setMarginsBackgroundColor(QColor("#1E1E1E"))
+        self.setMarginsForegroundColor(QColor("#858585"))
+        self.setMarginType(1, QsciScintilla.MarginType.SymbolMargin)
+        self.setMarginWidth(1, 14)
+        self.setMarginSensitivity(1, False)
+        self.markerDefine(QsciScintilla.MarkerSymbol.RightTriangle, self._MARKER_ERROR)
+        self.setMarkerBackgroundColor(QColor("#FF6B6B"), self._MARKER_ERROR)
+        self.setMarkerForegroundColor(QColor("#FF6B6B"), self._MARKER_ERROR)
+        self.setMarginMarkerMask(1, 1 << self._MARKER_ERROR)
+
+        # Inline error annotation
+        self.setAnnotationDisplay(QsciScintilla.AnnotationDisplay.AnnotationBoxed)
+        try:
+            self._err_style = QsciStyle(
+                -1, "syntax_error", QColor("#FF6B6B"), QColor("#3A1E1E"), font)
+        except Exception:  # pragma: no cover - defensive
+            self._err_style = None
+
+        # --- Hover help (Jedi) ---
+        self.SendScintilla(QsciScintilla.SCI_SETMOUSEDWELLTIME, 500)
+        self.SCN_DWELLSTART.connect(self._on_dwell_start)
+        self.SCN_DWELLEND.connect(self._on_dwell_end)
+
+        # --- Live, debounced syntax check ---
+        self._syntax_timer = QTimer(self)
+        self._syntax_timer.setSingleShot(True)
+        self._syntax_timer.setInterval(400)
+        self._syntax_timer.timeout.connect(self._run_live_syntax_check)
+        self.textChanged.connect(self._syntax_timer.start)
+
+    # ------------------------------------------------------------------
+    # QPlainTextEdit compatibility shims
+    # ------------------------------------------------------------------
+
+    def setPlainText(self, text: str):
+        self.setText(text or "")
+
+    def toPlainText(self) -> str:
+        return self.text()
+
+    def setPlaceholderText(self, text: str):
+        # QScintilla has no placeholder; the default script comment templates
+        # act as the on-screen hint. Intentionally a no-op.
+        pass
+
+    # ------------------------------------------------------------------
+    # Theming & autocompletion data
+    # ------------------------------------------------------------------
+
+    def _apply_theme(self):
+        """Colour the Python lexer to match the previous VS Code-ish scheme."""
+        lex = self._lexer
+        paper = QColor("#1E1E1E")
+        default_fg = QColor("#D4D4D4")
+        lex.setDefaultPaper(paper)
+        lex.setDefaultColor(default_fg)
+        for style in range(0, 16):
+            lex.setPaper(paper, style)
+            lex.setColor(default_fg, style)
+        colors = {
+            QsciLexerPython.Keyword: "#569CD6",
+            QsciLexerPython.ClassName: "#4EC9B0",
+            QsciLexerPython.FunctionMethodName: "#4EC9B0",
+            QsciLexerPython.Comment: "#6A9955",
+            QsciLexerPython.CommentBlock: "#6A9955",
+            QsciLexerPython.Number: "#B5CEA8",
+            QsciLexerPython.DoubleQuotedString: "#CE9178",
+            QsciLexerPython.SingleQuotedString: "#CE9178",
+            QsciLexerPython.TripleSingleQuotedString: "#CE9178",
+            QsciLexerPython.TripleDoubleQuotedString: "#CE9178",
+            QsciLexerPython.UnclosedString: "#CE9178",
+            QsciLexerPython.Decorator: "#DCDCAA",
+        }
+        for style, hexc in colors.items():
+            lex.setColor(QColor(hexc), style)
+
+    def _compute_base_words(self) -> list[str]:
+        """Always-available completion words: keywords, builtins and the
+        whitelisted modules with their public members (dotted)."""
+        words = list(keyword.kwlist)
+        words += [
+            "print", "len", "range", "int", "float", "str", "bool", "abs",
+            "min", "max", "round", "type", "list", "dict", "set", "tuple",
+            "sum", "enumerate", "zip", "sorted", "reversed", "any", "all",
+            "True", "False", "None",
+        ]
+        import importlib
+        for mod_name in WHITELIST_MODULES:
+            words.append(mod_name)
+            try:
+                mod = importlib.import_module(mod_name)
+                for member in dir(mod):
+                    if not member.startswith("_"):
+                        words.append(f"{mod_name}.{member}")
+            except Exception:  # pragma: no cover - defensive
+                pass
+        return words
+
+    def _rebuild_apis(self):
+        """Repopulate the autocompletion API with base words + known aliases."""
+        self._apis.clear()
+        for word in self._base_words + self._known_names:
+            self._apis.add(word)
+        self._apis.prepare()
+
+    def set_known_names(self, names):
+        """Update the alias names available to autocompletion (called by the
+        editor host whenever input/output/user-input aliases change)."""
+        self._known_names = [n for n in names if n]
+        self._rebuild_apis()
+
+    # ------------------------------------------------------------------
+    # Bracket / quote auto-close
+    # ------------------------------------------------------------------
 
     def keyPressEvent(self, event):
-        """Convert Tab key to 4 spaces"""
-        if event.key() == Qt.Key.Key_Tab:
-            self.insertPlainText("    ")
-        else:
+        ch = event.text()
+        if ch in _AUTO_CLOSE and not self.hasSelectedText():
             super().keyPressEvent(event)
+            self.insert(_AUTO_CLOSE[ch])
+            return
+        super().keyPressEvent(event)
+
+    # ------------------------------------------------------------------
+    # Syntax checking (compile-only — never flags undefined names)
+    # ------------------------------------------------------------------
+
+    def check_syntax(self):
+        """Return (ok, message, line_number). line_number is 1-based, -1 if ok."""
+        try:
+            compile(self.text(), "<script>", "exec")
+            return True, "", -1
+        except SyntaxError as e:
+            return False, e.msg, (e.lineno or 1)
+
+    def _run_live_syntax_check(self):
+        self.markerDeleteAll(self._MARKER_ERROR)
+        self.clearAnnotations()
+        ok, msg, lineno = self.check_syntax()
+        if not ok:
+            line0 = max(0, lineno - 1)
+            self.markerAdd(line0, self._MARKER_ERROR)
+            if self._err_style is not None:
+                self.annotate(line0, f"SyntaxError: {msg}", self._err_style)
+        self.syntax_status.emit(ok, msg, lineno)
+
+    # ------------------------------------------------------------------
+    # Jedi hover help
+    # ------------------------------------------------------------------
+
+    def _jedi_preamble(self) -> str:
+        """Source prepended before the editor text so Jedi resolves injected
+        imports and alias names. Returns the preamble text (newline-terminated)."""
+        lines = [f"import {', '.join(WHITELIST_MODULES)}"]
+        lines += [f"{name} = 0" for name in self._known_names]
+        return "\n".join(lines) + "\n"
+
+    def _on_dwell_start(self, position, x, y):
+        if self._jedi is None:
+            return
+        try:
+            line, index = self.lineIndexFromPosition(position)
+            preamble = self._jedi_preamble()
+            offset = preamble.count("\n")
+            source = preamble + self.text()
+            script = self._jedi.Script(code=source)
+            # Jedi lines are 1-based; editor line is 0-based
+            jline = line + offset + 1
+            help_text = ""
+            sigs = script.get_signatures(jline, index)
+            if sigs:
+                help_text = sigs[0].to_string()
+            else:
+                names = script.help(jline, index)
+                if names:
+                    name = names[0]
+                    doc = (name.docstring() or "").strip()
+                    if doc:
+                        help_text = doc.split("\n\n")[0]
+            if help_text:
+                QToolTip.showText(self.mapToGlobal(QPoint(x, y)), help_text, self)
+        except Exception:  # pragma: no cover - hover must never crash editing
+            pass
+
+    def _on_dwell_end(self, position, x, y):
+        QToolTip.hideText()
 
 
 class TagTableWidget(QWidget):
@@ -57,6 +290,9 @@ class TagTableWidget(QWidget):
     Reusable widget for a table of (tag, alias) pairs.
     Used for both input_tags and output_tags.
     """
+
+    # Emitted whenever rows (and therefore aliases) change
+    tags_changed = pyqtSignal()
 
     def __init__(self, title: str, alias_hint: str = "e.g. tank_level", parent=None):
         super().__init__(parent)
@@ -117,8 +353,13 @@ class TagTableWidget(QWidget):
         self.table.setItem(row, 0, QTableWidgetItem(tag))
         self.table.setItem(row, 1, QTableWidgetItem(alias))
         remove_btn = QPushButton("Remove")
-        remove_btn.clicked.connect(lambda: self.table.removeRow(self.table.indexAt(remove_btn.pos()).row()))
+        remove_btn.clicked.connect(lambda: self._remove_row(remove_btn))
         self.table.setCellWidget(row, 2, remove_btn)
+        self.tags_changed.emit()
+
+    def _remove_row(self, remove_btn: QPushButton):
+        self.table.removeRow(self.table.indexAt(remove_btn.pos()).row())
+        self.tags_changed.emit()
 
     def get_entries(self) -> list[TagEntry]:
         entries = []
@@ -332,29 +573,45 @@ class ModuleEditorWidget(QWidget):
 
         layout.addWidget(script_tabs)
 
+        # Keep editor autocompletion in sync with tag aliases as they change
+        self.input_tags_widget.tags_changed.connect(self._refresh_editor_names)
+        self.output_tags_widget.tags_changed.connect(self._refresh_editor_names)
+        self._refresh_editor_names()
+
+    def _refresh_editor_names(self):
+        """Push the current set of alias names into both script editors so
+        autocompletion knows about them."""
+        names = []
+        names += [e.alias for e in self.input_tags_widget.get_entries()]
+        names += [e.alias for e in self.output_tags_widget.get_entries()]
+        if self._module and self._module.user_inputs:
+            names += [u.alias for u in self._module.user_inputs]
+        self.init_editor.set_known_names(names)
+        self.loop_editor.set_known_names(names)
+
     def _add_user_input(self):
         """Add a user input control"""
         alias = self.input_alias_edit.text().strip()
         label = self.input_label_edit.text().strip()
         input_type = self.input_type_combo.currentText()
-        
+
         if not alias or not label:
             QMessageBox.warning(self, "Missing Info", "Please enter alias and label")
             return
-        
+
         # Determine default value based on type
         if input_type in ['float', 'int']:
             default_value = 0.0 if input_type == 'float' else 0
         else:
             default_value = False
-        
+
         user_input = UserInput(
             alias=alias,
             input_type=input_type,
             label=label,
             default_value=default_value
         )
-        
+
         # Get current inputs from the loaded module and append
         if not hasattr(self, '_module') or self._module is None:
             self._module = SimModule()
@@ -381,6 +638,7 @@ class ModuleEditorWidget(QWidget):
         self.user_inputs_panel.set_inputs(module.user_inputs)
         self.init_editor.setPlainText(module.init_script)
         self.loop_editor.setPlainText(module.loop_script)
+        self._refresh_editor_names()
 
     def collect_module(self) -> SimModule:
         """Build and return a SimModule from current UI state"""
@@ -430,7 +688,8 @@ class ModuleEditorWidget(QWidget):
         self._module.user_inputs.pop(current_row)
         self._refresh_user_inputs_list()
         self.user_inputs_panel.set_inputs(self._module.user_inputs)
-    
+        self._refresh_editor_names()
+
     def _delete_user_input(self):
         """Delete the selected user input"""
         current_row = self.user_inputs_list.currentRow()
@@ -453,7 +712,8 @@ class ModuleEditorWidget(QWidget):
             self._module.user_inputs.pop(current_row)
             self._refresh_user_inputs_list()
             self.user_inputs_panel.set_inputs(self._module.user_inputs)
-    
+            self._refresh_editor_names()
+
     def _add_user_input(self):
         """Add a user input control"""
         alias = self.input_alias_edit.text().strip()
@@ -482,10 +742,11 @@ class ModuleEditorWidget(QWidget):
             self._module = SimModule()
         
         self._module.user_inputs.append(user_input)
-        
+
         # Refresh displays
         self._refresh_user_inputs_list()
         self.user_inputs_panel.set_inputs(self._module.user_inputs)
+        self._refresh_editor_names()
         
         # Clear input fields
         self.input_alias_edit.clear()
@@ -690,6 +951,22 @@ class SimulationTab(QWidget):
             return
 
         module = self._modules[self._current_index]
+
+        # Pre-run syntax gate — never run a syntax-broken script against the PLC
+        for label, script in (("Init", module.init_script),
+                              ("Loop", module.loop_script)):
+            try:
+                compile(script, "<script>", "exec")
+            except SyntaxError as e:
+                line = e.lineno or 1
+                self._append_log(
+                    f"{label} script syntax error (line {line}): {e.msg}", "error")
+                QMessageBox.warning(
+                    self, "Syntax Error",
+                    f"{label} script has a syntax error on line {line}:\n\n{e.msg}\n\n"
+                    "Fix it before starting the simulation.")
+                return
+
         self._engine = SimEngine(module, self.plc, log_callback=self._append_log)
 
         if module.user_inputs:

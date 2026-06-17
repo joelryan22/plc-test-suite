@@ -17,6 +17,8 @@ Create a GUI-based testing and simulation tool that allows control engineers to 
 ### Runtime
 - **Python:** 3.8+ (3.11+ recommended)
 - **GUI Framework:** PyQt6 (6.4.0+)
+- **Code Editor:** QScintilla (PyQt6-QScintilla 2.14+) for the script editors
+- **Code Intelligence:** jedi (0.19+) for hover help / signatures
 - **PLC Communication:** pycomm3 (1.2.0+)
 - **File Format:** JSON (for .simmod modules)
 
@@ -242,7 +244,12 @@ finally:
 - [x] Tag Browser with UDT expansion
 - [x] User Input Controls (float, int, momentary, toggle)
 - [x] Module save/load (.simmod JSON files)
-- [x] Syntax highlighting (Python code editor)
+- [x] QScintilla script editor: syntax highlighting, line numbers, auto-indent,
+      brace matching, bracket auto-close
+- [x] Alias-aware autocomplete (tag/user-input aliases + keywords + builtins +
+      whitelisted modules), Jedi hover help/signatures
+- [x] Compile-only syntax checking (live error markers + pre-run gate before PLC writes)
+- [x] Whitelisted `math` / `time` / `random` available in scripts
 - [x] Collapsible execution log
 - [x] Optional heartbeat tag for connection status
 - [x] Error handling (graceful disconnect, protected UDTs)
@@ -412,7 +419,12 @@ counter += 1
 
 ### Technical Debt
 - No error handling for corrupted .simmod files
-- No validation of Python script syntax before execution
+- Script syntax is validated (compile-only) live and before run; semantic/runtime
+  errors are still only caught at execution (reported with a line number)
+- `syntax_highlighter.py` (`PythonHighlighter`) is now unused — the QScintilla
+  lexer replaced it; candidate for deletion
+- `ModuleEditorWidget` has a duplicate `_add_user_input` definition (the second
+  shadows the first) — harmless but worth cleaning up
 - UI layout hardcoded (no responsive layout for different screen sizes)
 - No logging levels (all logs go to logger, not organized by severity)
 - Minimal comments in complex methods
