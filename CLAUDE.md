@@ -509,6 +509,11 @@ counter += 1
 
 ## Changelog
 
+### v1.26.06.03
+- Scripts can end the simulation gracefully with `stop("reason")` /
+  `stop_simulation()` — disables sim tags and resets the UI like the Stop button
+  (previously `exit()` would kill the loop thread but leave the PLC in sim mode)
+
 ### v1.26.06.02
 - Script editors upgraded to QScintilla: line-number gutter, auto-indent, brace
   matching, bracket/quote auto-close
