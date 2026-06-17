@@ -250,6 +250,8 @@ finally:
       whitelisted modules), Jedi hover help/signatures
 - [x] Compile-only syntax checking (live error markers + pre-run gate before PLC writes)
 - [x] Whitelisted `math` / `time` / `random` available in scripts
+- [x] Scripts can end the simulation gracefully via `stop("reason")` (disables sim
+      tags and resets the UI, same as the Stop button)
 - [x] Collapsible execution log
 - [x] Optional heartbeat tag for connection status
 - [x] Error handling (graceful disconnect, protected UDTs)
@@ -506,6 +508,11 @@ counter += 1
    - Git workflow: Use branches for features, squash commits before merge
 
 ## Changelog
+
+### v1.26.06.03
+- Scripts can end the simulation gracefully with `stop("reason")` /
+  `stop_simulation()` — disables sim tags and resets the UI like the Stop button
+  (previously `exit()` would kill the loop thread but leave the PLC in sim mode)
 
 ### v1.26.06.02
 - Script editors upgraded to QScintilla: line-number gutter, auto-indent, brace

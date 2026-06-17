@@ -182,6 +182,8 @@ class ScriptEditor(QsciScintilla):
             "min", "max", "round", "type", "list", "dict", "set", "tuple",
             "sum", "enumerate", "zip", "sorted", "reversed", "any", "all",
             "True", "False", "None",
+            # Injected into the script namespace by SimEngine
+            "stop", "stop_simulation",
         ]
         import importlib
         for mod_name in WHITELIST_MODULES:
@@ -499,7 +501,8 @@ class ModuleEditorWidget(QWidget):
         loop_widget = QWidget()
         loop_layout = QVBoxLayout(loop_widget)
         loop_layout.addWidget(QLabel(
-            "Loop Script — runs every interval. Use aliases to read inputs and write outputs."))
+            "Loop Script — runs every interval. Use aliases to read inputs and write "
+            "outputs. Call stop(\"reason\") to end the simulation."))
         self.loop_editor = ScriptEditor()
         self.loop_editor.setMinimumHeight(200)
         self.loop_editor.setPlaceholderText(
@@ -760,6 +763,10 @@ class SimulationTab(QWidget):
       - Right panel: ModuleEditorWidget + run controls + live log
     """
 
+    # Emitted (possibly from the engine's worker thread) when the engine stops
+    # on its own — e.g. a script called stop(). Queued to the main thread.
+    engine_finished = pyqtSignal()
+
     def __init__(self, plc, parent=None):
         super().__init__(parent)
         self.plc = plc
@@ -767,6 +774,7 @@ class SimulationTab(QWidget):
         self._modules: list[SimModule] = []
         self._current_index: int = -1
         self._init_ui()
+        self.engine_finished.connect(self._on_engine_finished)
 
     def _init_ui(self):
         outer = QHBoxLayout(self)
@@ -981,6 +989,9 @@ class SimulationTab(QWidget):
                 return
 
         self._engine = SimEngine(module, self.plc, log_callback=self._append_log)
+        # Reset the UI if the engine stops itself (script called stop()).
+        # emit is thread-safe — delivers to _on_engine_finished on the main thread.
+        self._engine.on_finished = self.engine_finished.emit
 
         if module.user_inputs:
             def get_user_input_values():
@@ -1004,6 +1015,15 @@ class SimulationTab(QWidget):
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status_label.setText("Stopped")
+        self.status_label.setStyleSheet("color: gray; font-weight: bold;")
+
+    def _on_engine_finished(self):
+        """Reset the UI after the engine stopped itself (script called stop()).
+        Runs on the main thread via the engine_finished signal."""
+        self._engine = None
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.status_label.setText("Stopped (by script)")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
 
     def _append_log(self, msg: str, level: str = "info"):
