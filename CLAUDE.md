@@ -495,6 +495,15 @@ counter += 1
 
 ## Changelog
 
+### v1.26.06.01
+- Reconciled version numbering to the documented `MAJOR.YY.MM.MINOR` scheme
+  (package files previously read `0.1.0`)
+- Confirmed Python syntax highlighting ships in the script editors (init/loop) —
+  the prior release build predated the highlighter
+- Includes earlier fixes: optional heartbeat tag for connection status, tag-browser
+  UDT expansion, safer PLC disconnect handling, simulation-tab layout spacing
+- CLAUDE.md developer guide now tracked in the repository
+
 ### v1.26.02.01 (Initial Release)
 - Complete simulation module engine
 - All four main tabs functional
@@ -506,6 +515,6 @@ counter += 1
 
 ---
 
-**Last Updated:** February 2026  
-**Maintainer:** You  
+**Last Updated:** June 2026  
+**Maintainer:** Joel Ryan  
 **License:** Internal Use
