@@ -223,13 +223,20 @@ class SimEngine:
             [(t.alias, t.tag) for t in self.module.output_tags]
         )
 
+        # Whitelisted modules available to scripts (kept in sync with
+        # WHITELIST_MODULES in sim_tab.py). `time` is aliased locally to avoid
+        # shadowing the module-level import used by this engine.
+        import math
+        import time as _time
+        import random
+        ns = {"math": math, "time": _time, "random": random}
+
         if not all_tags:
-            return {}
+            return ns
 
         tag_names = [tag for _, tag in all_tags]
         values = self.plc.read_tags(tag_names)
 
-        ns = {}
         for alias, tag in all_tags:
             val = values.get(tag)
             if val is None:
@@ -284,7 +291,16 @@ class SimEngine:
             exec(compile(script, label, "exec"), self._script_ns)
             return True
         except Exception as e:
-            self._log(f"Script error in {label}: {type(e).__name__}: {e}", "error")
+            # Find the line number inside the user's script (frames compiled
+            # with `label` as the filename)
+            lineno = None
+            tb = e.__traceback__
+            while tb is not None:
+                if tb.tb_frame.f_code.co_filename == label:
+                    lineno = tb.tb_lineno
+                tb = tb.tb_next
+            where = f" (line {lineno})" if lineno else ""
+            self._log(f"Script error in {label}{where}: {type(e).__name__}: {e}", "error")
             return False
 
     def _log(self, msg: str, level: str = "info"):

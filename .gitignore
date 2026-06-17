@@ -45,6 +45,7 @@ Thumbs.db
 *.log
 
 # PyInstaller
-*.spec
+# NOTE: PLC-Test-Suite.spec is intentionally tracked — it holds hand-written
+# bundling config (collect_all for jedi, PyQt6.Qsci hiddenimport).
 build/
 dist/
