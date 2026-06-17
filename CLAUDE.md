@@ -507,6 +507,18 @@ counter += 1
 
 ## Changelog
 
+### v1.26.06.02
+- Script editors upgraded to QScintilla: line-number gutter, auto-indent, brace
+  matching, bracket/quote auto-close
+- Alias-aware autocomplete (tag/user-input aliases + keywords + builtins +
+  packaged module members) and Jedi hover help / signatures
+- Compile-only syntax checking: live error markers plus a pre-run gate that blocks
+  starting a syntax-broken script; runtime errors now report the script line number
+- `math` / `time` / `random` packaged and available in scripts, with an
+  "Included Libraries" reference on the Simulation Modules tab
+- Added offscreen smoke tests; `PLC-Test-Suite.spec` is now tracked (bundles
+  QScintilla + jedi/parso)
+
 ### v1.26.06.01
 - Reconciled version numbering to the documented `MAJOR.YY.MM.MINOR` scheme
   (package files previously read `0.1.0`)
