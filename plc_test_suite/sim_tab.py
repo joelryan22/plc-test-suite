@@ -798,6 +798,19 @@ class SimulationTab(QWidget):
         left_layout.addWidget(delete_btn)
 
         left_layout.addStretch()
+
+        # Included libraries reference (available for use in scripts)
+        libs_group = QGroupBox("Included Libraries")
+        libs_layout = QVBoxLayout(libs_group)
+        libs_layout.setContentsMargins(8, 4, 8, 4)
+        libs_label = QLabel("\n".join(WHITELIST_MODULES))
+        libs_label.setStyleSheet("color: #4EC9B0;")
+        libs_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+        libs_label.setToolTip("Python modules packaged with the app and available "
+                              "to import/use in your scripts.")
+        libs_layout.addWidget(libs_label)
+        left_layout.addWidget(libs_group)
+
         outer.addWidget(left_panel)
 
         # ── Right panel ─────────────────────────────────────────────
