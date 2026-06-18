@@ -277,11 +277,29 @@ finally:
 
 ## What's Next 🔮
 
+### Current State (June 2026, v1.26.06.03)
+The script editor is now the standout feature: a QScintilla-based mini-IDE with
+alias-aware autocomplete, Jedi hover help, compile-only syntax checking (live +
+pre-run gate), packaged `math`/`time`/`random`, and a `stop()` function so scripts
+can end a run gracefully. Three releases shipped this cycle (`.01` version
+reconciliation, `.02` editor upgrade, `.03` script `stop()`), all published to GitHub
+Releases with the standalone exe. The app builds clean from source and frozen.
+
+Nothing below is started — these are the open ideas, roughly prioritized.
+
 ### Short Term (Next 1-2 releases)
-- [ ] GitHub Actions for automated .exe builds
-- [ ] Code signing for .exe (optional, eliminates Windows Defender warning)
+- [ ] GitHub Actions for automated .exe builds (still fully manual via PyInstaller)
+- [ ] Code signing for .exe (eliminates the Windows SmartScreen warning — gotcha #6)
 - [ ] Example modules for common scenarios (tank fill, PID loop, fault injection)
 - [ ] User preferences (default IP, favorite modules, theme)
+
+### Code cleanup (low effort, surfaced during the editor work)
+- [ ] Delete unused `syntax_highlighter.py` / `PythonHighlighter` (QScintilla replaced it)
+- [ ] Remove the duplicate `_add_user_input` definition in `ModuleEditorWidget`
+- [ ] Optional: let Jedi drive context completion (dotted attrs) too — today Jedi
+      powers hover only; autocomplete is QsciAPIs (aliases/keywords/builtins/module members)
+- [ ] Manual check still pending: confirm `math.sqrt` hover works in the *frozen* exe
+      (verified from source; jedi/typeshed data is bundled)
 
 ### Medium Term
 - [ ] Historical data logging (record tag values over time)
