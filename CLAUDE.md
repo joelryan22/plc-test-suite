@@ -285,13 +285,15 @@ finally:
 
 ## What's Next 🔮
 
-### Current State (June 2026, v1.26.06.03)
-The script editor is now the standout feature: a QScintilla-based mini-IDE with
+### Current State (June 2026, v1.26.06.04)
+Two pillars now stand out. The script editor is a QScintilla-based mini-IDE with
 alias-aware autocomplete, Jedi hover help, compile-only syntax checking (live +
 pre-run gate), packaged `math`/`time`/`random`, and a `stop()` function so scripts
-can end a run gracefully. Three releases shipped this cycle (`.01` version
-reconciliation, `.02` editor upgrade, `.03` script `stop()`), all published to GitHub
-Releases with the standalone exe. The app builds clean from source and frozen.
+can end a run gracefully. And the new **Trend tab** plots simulation aliases live
+(pyqtgraph), persists after stop, and saves/loads reloadable CSVs — paired with a
+**Run All / Run Single** mode (multiple concurrent engines) and an active-simulation
+indicator in the connection box. Released across `.01`–`.04` this cycle, all published
+to GitHub Releases with the standalone exe. The app builds clean from source and frozen.
 
 Nothing below is started — these are the open ideas, roughly prioritized.
 
@@ -534,6 +536,18 @@ counter += 1
    - Git workflow: Use branches for features, squash commits before merge
 
 ## Changelog
+
+### v1.26.06.04
+- New **Trend tab**: live pyqtgraph plot of input/output/user-input aliases with
+  per-channel color, samples logged each sim cycle, persists after stop, and
+  save/load to a reloadable CSV
+- **Run All / Run Single**: a Run Controls checkbox runs every module concurrently
+  (one engine each) or just the selected one; Stop stops all, script `stop()` ends a
+  single module and leaves the rest running
+- **Active-simulation indicator** in the persistent PLC connection box (module name /
+  "All Modules" / None), visible from any tab
+- Trend channels are module-prefixed when several modules run; added `pyqtgraph`/`numpy`
+  dependencies (bundled in the spec)
 
 ### v1.26.06.03
 - Scripts can end the simulation gracefully with `stop("reason")` /
