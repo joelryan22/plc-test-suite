@@ -71,6 +71,7 @@ class PLCTestSuiteGUI(QMainWindow):
         
         # Simulation Modules tab (new)
         self.sim_tab = SimulationTab(self.plc)
+        self.sim_tab.active_simulation_changed.connect(self._update_active_sim)
         tab_widget.addTab(self.sim_tab, "Simulation Modules")
 
         # Trend tab - live plotting of simulation aliases
@@ -111,8 +112,15 @@ class PLCTestSuiteGUI(QMainWindow):
         # Connection status
         self.connection_status = QLabel("⚫ Disconnected")
         ip_row.addWidget(self.connection_status)
-        
+
         ip_row.addStretch()
+
+        # Active simulation indicator (persistent across tabs)
+        ip_row.addWidget(QLabel("Active Simulation:"))
+        self.active_sim_label = QLabel("None")
+        self.active_sim_label.setStyleSheet("font-weight: bold; color: gray;")
+        ip_row.addWidget(self.active_sim_label)
+
         layout.addLayout(ip_row)
         
         # Second row - Heartbeat tag (NEW)
@@ -493,6 +501,15 @@ class PLCTestSuiteGUI(QMainWindow):
     def update_status(self, message: str):
         """Update status bar message"""
         self.status_bar.showMessage(message)
+
+    def _update_active_sim(self, name: str):
+        """Update the persistent active-simulation indicator in the connection box."""
+        if name:
+            self.active_sim_label.setText(name)
+            self.active_sim_label.setStyleSheet("font-weight: bold; color: green;")
+        else:
+            self.active_sim_label.setText("None")
+            self.active_sim_label.setStyleSheet("font-weight: bold; color: gray;")
     
     def closeEvent(self, event):
         """Handle application close"""

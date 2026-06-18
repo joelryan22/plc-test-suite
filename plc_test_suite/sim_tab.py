@@ -785,6 +785,10 @@ class SimulationTab(QWidget):
     simulation_stopped = pyqtSignal()
     sample_logged = pyqtSignal(float, dict)
     run_mode_changed = pyqtSignal()
+    # Human-readable description of what's running ("" when stopped, a module
+    # name when one runs, "All Modules" when several). Drives the persistent
+    # indicator in the PLC connection box.
+    active_simulation_changed = pyqtSignal(str)
 
     def __init__(self, plc, parent=None):
         super().__init__(parent)
@@ -1034,6 +1038,16 @@ class SimulationTab(QWidget):
         self.status_label.setText("● Running" if n <= 1 else f"● Running ({n})")
         self.status_label.setStyleSheet("color: green; font-weight: bold;")
 
+    def _emit_active_label(self):
+        """Publish what's running for the persistent connection-box indicator:
+        "" when stopped, the module name when one runs, "All Modules" otherwise."""
+        if not self._engines:
+            self.active_simulation_changed.emit("")
+        elif len(self._engines) == 1:
+            self.active_simulation_changed.emit(self._engines[0].module.name)
+        else:
+            self.active_simulation_changed.emit("All Modules")
+
     def _start_module(self):
         if not self.plc.connected:
             QMessageBox.warning(self, "Not Connected", "Please connect to PLC first.")
@@ -1094,6 +1108,7 @@ class SimulationTab(QWidget):
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self._update_running_status()
+        self._emit_active_label()
         self.simulation_started.emit(self.get_trend_channels())
 
     def _stop_module(self):
@@ -1106,6 +1121,7 @@ class SimulationTab(QWidget):
         self.stop_btn.setEnabled(False)
         self.status_label.setText("Stopped")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
+        self._emit_active_label()
         self.simulation_stopped.emit()
 
     def _on_engine_finished(self, engine):
@@ -1117,11 +1133,13 @@ class SimulationTab(QWidget):
             self._engines.remove(engine)
         if self._engines:
             self._update_running_status()
+            self._emit_active_label()
             return
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status_label.setText("Stopped (by script)")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
+        self._emit_active_label()
         self.simulation_stopped.emit()
 
     def _append_log(self, msg: str, level: str = "info"):

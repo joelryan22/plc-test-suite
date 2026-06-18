@@ -76,11 +76,33 @@ def test_trend_channels_prefixed_when_multiple(app):
     assert len([c for c in channels if c.endswith(": level")]) == 2
 
 
+def test_active_simulation_label(app):
+    tab = _make_tab()
+    seen = []
+    tab.active_simulation_changed.connect(seen.append)
+
+    tab.run_all_cb.setChecked(False)
+    tab._start_module()
+    assert seen[-1] == tab._engines[0].module.name  # single module name
+    tab._stop_module()
+    assert seen[-1] == ""                            # cleared on stop
+
+    tab.run_all_cb.setChecked(True)
+    tab._start_module()
+    assert seen[-1] == "All Modules"                 # several running
+    tab._stop_module()
+    assert seen[-1] == ""
+
+
 def test_script_stop_leaves_others_running_until_last(app):
     tab = _make_tab()
 
+    class _FakeModule:
+        name = "M"
+
     class _FakeEngine:
         is_running = True
+        module = _FakeModule()
 
         def stop(self):
             pass

@@ -258,6 +258,8 @@ finally:
 - [x] Run All / Run Single: a Run Controls checkbox runs every module concurrently
       (multiple engines) or just the selected one; trend channels are module-prefixed
       when several run; Stop stops all, script `stop()` ends one and keeps the rest
+- [x] Active-simulation indicator in the persistent PLC connection box (module name /
+      "All Modules" / None) so the running module is visible from any tab
 - [x] Collapsible execution log
 - [x] Optional heartbeat tag for connection status
 - [x] Error handling (graceful disconnect, protected UDTs)
