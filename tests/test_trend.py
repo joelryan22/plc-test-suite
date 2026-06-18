@@ -25,14 +25,23 @@ class _DummyPLC:
         return True
 
 
+class _EditorStub(QObject):
+    aliases_changed = pyqtSignal()
+
+
 class _SimTabStub(QObject):
     """Minimal stand-in for SimulationTab exposing the signals TrendTab uses."""
     simulation_started = pyqtSignal(object)
     simulation_stopped = pyqtSignal()
     sample_logged = pyqtSignal(float, dict)
 
+    def __init__(self):
+        super().__init__()
+        self.editor = _EditorStub()
+        self._alias_names = []
+
     def get_alias_names(self):
-        return []
+        return self._alias_names
 
 
 def _module():
@@ -94,6 +103,20 @@ def test_trend_buffers_and_round_trips_csv(app, tmp_path, monkeypatch):
     assert trend2._data["tank_level"][1] == [0.0, 2.0]
     assert "tank_level" in trend2._series
     assert trend2._series["tank_level"]["color"].startswith("#")
+
+
+def test_channels_appear_when_aliases_added(app):
+    from plc_test_suite.trend_tab import TrendTab
+    stub = _SimTabStub()
+    trend = TrendTab(stub)
+    assert "tank_level" not in trend._series
+
+    # Simulate adding an alias on the Simulation tab (no run required)
+    stub._alias_names = ["tank_level"]
+    stub.editor.aliases_changed.emit()
+
+    assert "tank_level" in trend._series
+    assert "tank_level" in trend._rows
 
 
 def test_trend_overwrites_on_restart(app):

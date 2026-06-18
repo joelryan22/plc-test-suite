@@ -431,6 +431,9 @@ class ModuleEditorWidget(QWidget):
     Emits module_changed when any field is edited.
     """
     module_changed = pyqtSignal()
+    # Emitted whenever the set of alias names changes (tag tables, user inputs,
+    # or a module load) so other views (e.g. the Trend tab) can resync live.
+    aliases_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -592,10 +595,11 @@ class ModuleEditorWidget(QWidget):
 
     def _refresh_editor_names(self):
         """Push the current set of alias names into both script editors so
-        autocompletion knows about them."""
+        autocompletion knows about them, and notify other views."""
         names = self.get_alias_names()
         self.init_editor.set_known_names(names)
         self.loop_editor.set_known_names(names)
+        self.aliases_changed.emit()
 
     def _add_user_input(self):
         """Add a user input control"""
@@ -973,6 +977,11 @@ class SimulationTab(QWidget):
     # ------------------------------------------------------------------
     # Run controls
     # ------------------------------------------------------------------
+
+    def get_alias_names(self) -> list:
+        """All alias names in the current module (delegates to the editor).
+        Used by the Trend tab to populate its channel list."""
+        return self.editor.get_alias_names()
 
     def _start_module(self):
         if not self.plc.connected:

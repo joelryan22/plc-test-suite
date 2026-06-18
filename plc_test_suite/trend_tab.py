@@ -57,6 +57,8 @@ class TrendTab(QWidget):
         sim_tab.simulation_started.connect(self._on_started)
         sim_tab.simulation_stopped.connect(self._on_stopped)
         sim_tab.sample_logged.connect(self._on_sample)
+        # Show channels as soon as their aliases are added (no run required)
+        sim_tab.editor.aliases_changed.connect(self._on_aliases_changed)
 
         # Redraw timer (active only while recording, to decouple draw rate from
         # the sample rate)
@@ -124,6 +126,12 @@ class TrendTab(QWidget):
     def showEvent(self, event):
         """Refresh the channel list from the current module when shown."""
         super().showEvent(event)
+        if not self._running:
+            self._sync_aliases(self._sim_tab.get_alias_names())
+
+    def _on_aliases_changed(self):
+        """An alias was added/removed on the Simulation tab — resync the channel
+        list immediately so it appears without needing a run."""
         if not self._running:
             self._sync_aliases(self._sim_tab.get_alias_names())
 
