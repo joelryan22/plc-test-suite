@@ -34,14 +34,15 @@ class _SimTabStub(QObject):
     simulation_started = pyqtSignal(object)
     simulation_stopped = pyqtSignal()
     sample_logged = pyqtSignal(float, dict)
+    run_mode_changed = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self.editor = _EditorStub()
-        self._alias_names = []
+        self._channels = []
 
-    def get_alias_names(self):
-        return self._alias_names
+    def get_trend_channels(self):
+        return self._channels
 
 
 def _module():
@@ -81,8 +82,7 @@ def test_trend_buffers_and_round_trips_csv(app, tmp_path, monkeypatch):
     trend = TrendTab(stub)
 
     # Start a run and feed two samples
-    mod = _module()
-    stub.simulation_started.emit(mod)
+    stub.simulation_started.emit(["valve_cmd", "tank_level", "manual"])
     stub.sample_logged.emit(0.0, {"valve_cmd": 0.0, "tank_level": 0.0})
     stub.sample_logged.emit(1.0, {"valve_cmd": 50.0, "tank_level": 2.0})
     stub.simulation_stopped.emit()
@@ -112,7 +112,7 @@ def test_channels_appear_when_aliases_added(app):
     assert "tank_level" not in trend._series
 
     # Simulate adding an alias on the Simulation tab (no run required)
-    stub._alias_names = ["tank_level"]
+    stub._channels = ["tank_level"]
     stub.editor.aliases_changed.emit()
 
     assert "tank_level" in trend._series
@@ -123,12 +123,11 @@ def test_trend_overwrites_on_restart(app):
     from plc_test_suite.trend_tab import TrendTab
     stub = _SimTabStub()
     trend = TrendTab(stub)
-    mod = _module()
 
-    stub.simulation_started.emit(mod)
+    stub.simulation_started.emit(["tank_level"])
     stub.sample_logged.emit(0.0, {"tank_level": 5.0})
     assert trend._data["tank_level"][1] == [5.0]
 
     # Starting again wipes the previous trend
-    stub.simulation_started.emit(mod)
+    stub.simulation_started.emit(["tank_level"])
     assert trend._data.get("tank_level", ([], []))[1] == []

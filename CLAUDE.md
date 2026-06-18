@@ -255,6 +255,9 @@ finally:
       tags and resets the UI, same as the Stop button)
 - [x] Trend tab: live pyqtgraph plot of input/output/user-input aliases, per-channel
       color, samples logged each sim cycle, persists after stop, save/load reloadable CSV
+- [x] Run All / Run Single: a Run Controls checkbox runs every module concurrently
+      (multiple engines) or just the selected one; trend channels are module-prefixed
+      when several run; Stop stops all, script `stop()` ends one and keeps the rest
 - [x] Collapsible execution log
 - [x] Optional heartbeat tag for connection status
 - [x] Error handling (graceful disconnect, protected UDTs)

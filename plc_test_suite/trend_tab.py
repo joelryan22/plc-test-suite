@@ -57,8 +57,10 @@ class TrendTab(QWidget):
         sim_tab.simulation_started.connect(self._on_started)
         sim_tab.simulation_stopped.connect(self._on_stopped)
         sim_tab.sample_logged.connect(self._on_sample)
-        # Show channels as soon as their aliases are added (no run required)
+        # Show channels as soon as their aliases are added (no run required),
+        # and when the Run-all toggle changes the channel set.
         sim_tab.editor.aliases_changed.connect(self._on_aliases_changed)
+        sim_tab.run_mode_changed.connect(self._on_aliases_changed)
 
         # Redraw timer (active only while recording, to decouple draw rate from
         # the sample rate)
@@ -127,13 +129,14 @@ class TrendTab(QWidget):
         """Refresh the channel list from the current module when shown."""
         super().showEvent(event)
         if not self._running:
-            self._sync_aliases(self._sim_tab.get_alias_names())
+            self._sync_aliases(self._sim_tab.get_trend_channels())
 
     def _on_aliases_changed(self):
-        """An alias was added/removed on the Simulation tab — resync the channel
-        list immediately so it appears without needing a run."""
+        """An alias was added/removed (or the run mode toggled) on the Simulation
+        tab — resync the channel list immediately so it reflects the current set
+        without needing a run."""
         if not self._running:
-            self._sync_aliases(self._sim_tab.get_alias_names())
+            self._sync_aliases(self._sim_tab.get_trend_channels())
 
     # ------------------------------------------------------------------
     # Channel list management
@@ -206,14 +209,12 @@ class TrendTab(QWidget):
     # Simulation lifecycle
     # ------------------------------------------------------------------
 
-    def _on_started(self, module):
-        # Overwrite the previous trend
+    def _on_started(self, channels):
+        # Overwrite the previous trend. `channels` is the list of channel ids the
+        # run will emit (module-prefixed when several modules run).
         self._clear_plot()
         self._data = {}
-        names = [t.alias for t in module.input_tags]
-        names += [t.alias for t in module.output_tags]
-        names += [u.alias for u in module.user_inputs]
-        self._sync_aliases(names)
+        self._sync_aliases(channels)
         self._running = True
         self._timer.start()
         self._status.setText("● Recording")
