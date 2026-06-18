@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QGroupBox, QListWidget, QListWidgetItem,
     QFileDialog, QMessageBox, QDoubleSpinBox, QTextEdit,
-    QTabWidget, QFrame, QComboBox, QToolTip
+    QTabWidget, QFrame, QComboBox, QToolTip, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer, QPoint, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
@@ -431,6 +431,9 @@ class ModuleEditorWidget(QWidget):
     Emits module_changed when any field is edited.
     """
     module_changed = pyqtSignal()
+    # Emitted whenever the set of alias names changes (tag tables, user inputs,
+    # or a module load) so other views (e.g. the Trend tab) can resync live.
+    aliases_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -581,16 +584,22 @@ class ModuleEditorWidget(QWidget):
         self.output_tags_widget.tags_changed.connect(self._refresh_editor_names)
         self._refresh_editor_names()
 
-    def _refresh_editor_names(self):
-        """Push the current set of alias names into both script editors so
-        autocompletion knows about them."""
+    def get_alias_names(self) -> list:
+        """All alias names in the current module: input + output + user inputs."""
         names = []
         names += [e.alias for e in self.input_tags_widget.get_entries()]
         names += [e.alias for e in self.output_tags_widget.get_entries()]
         if self._module and self._module.user_inputs:
             names += [u.alias for u in self._module.user_inputs]
+        return names
+
+    def _refresh_editor_names(self):
+        """Push the current set of alias names into both script editors so
+        autocompletion knows about them, and notify other views."""
+        names = self.get_alias_names()
         self.init_editor.set_known_names(names)
         self.loop_editor.set_known_names(names)
+        self.aliases_changed.emit()
 
     def _add_user_input(self):
         """Add a user input control"""
@@ -763,14 +772,30 @@ class SimulationTab(QWidget):
       - Right panel: ModuleEditorWidget + run controls + live log
     """
 
-    # Emitted (possibly from the engine's worker thread) when the engine stops
-    # on its own — e.g. a script called stop(). Queued to the main thread.
-    engine_finished = pyqtSignal()
+    # Emitted (from a worker thread) with the engine that stopped itself — e.g.
+    # a script called stop(). Queued to the main thread.
+    engine_finished = pyqtSignal(object)
+
+    # Trend-tab integration. simulation_started carries the list of trend channel
+    # ids that will be recorded; sample_logged carries (elapsed_seconds,
+    # {channel_id: value}) each cycle and is emitted from an engine's worker
+    # thread (Qt queues it to the main thread). run_mode_changed fires when the
+    # Run-all checkbox toggles so the trend can re-sync its channel list.
+    simulation_started = pyqtSignal(object)
+    simulation_stopped = pyqtSignal()
+    sample_logged = pyqtSignal(float, dict)
+    run_mode_changed = pyqtSignal()
+    # Human-readable description of what's running ("" when stopped, a module
+    # name when one runs, "All Modules" when several). Drives the persistent
+    # indicator in the PLC connection box.
+    active_simulation_changed = pyqtSignal(str)
 
     def __init__(self, plc, parent=None):
         super().__init__(parent)
         self.plc = plc
-        self._engine: Optional[SimEngine] = None
+        self._engines: list[SimEngine] = []
+        self._qualify = False      # prefix channel ids with module name?
+        self._stopping = False     # guard against re-entrant finish handling
         self._modules: list[SimModule] = []
         self._current_index: int = -1
         self._init_ui()
@@ -842,6 +867,13 @@ class SimulationTab(QWidget):
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self._stop_module)
         run_layout.addWidget(self.stop_btn)
+
+        self.run_all_cb = QCheckBox("Run all modules")
+        self.run_all_cb.setToolTip(
+            "When checked, Start runs every module in the list; otherwise only "
+            "the selected module runs.")
+        self.run_all_cb.toggled.connect(lambda _: self.run_mode_changed.emit())
+        run_layout.addWidget(self.run_all_cb)
 
         self.status_label = QLabel("Stopped")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
@@ -962,69 +994,153 @@ class SimulationTab(QWidget):
     # Run controls
     # ------------------------------------------------------------------
 
+    def get_alias_names(self) -> list:
+        """All alias names in the current module (delegates to the editor).
+        Used by the Trend tab to populate its channel list."""
+        return self.editor.get_alias_names()
+
+    @staticmethod
+    def _module_aliases(module: SimModule) -> list:
+        names = [t.alias for t in module.input_tags]
+        names += [t.alias for t in module.output_tags]
+        names += [u.alias for u in module.user_inputs]
+        return names
+
+    def get_trend_channels(self) -> list:
+        """Channel ids the Trend tab should show for the current run mode.
+
+        Run-all with more than one module → every module's aliases prefixed with
+        the module name (matching the keys emitted at run time). Otherwise the
+        current module's bare aliases."""
+        if self.run_all_cb.isChecked() and len(self._modules) > 1:
+            self._save_current_to_list()
+            channels = []
+            for m in self._modules:
+                channels += [f"{m.name}: {a}" for a in self._module_aliases(m)]
+            return channels
+        return self.editor.get_alias_names()
+
+    def _qualify_keys(self, module: SimModule, sample: dict) -> dict:
+        """Prefix sample keys with the module name when multiple modules run."""
+        if not self._qualify:
+            return sample
+        return {f"{module.name}: {k}": v for k, v in sample.items()}
+
+    def _user_input_getter(self, module, selected):
+        """Live panel values for the selected module; saved defaults otherwise."""
+        if module is selected:
+            return lambda: self.editor.user_inputs_panel.get_values()
+        defaults = {u.alias: u.default_value for u in module.user_inputs}
+        return lambda: dict(defaults)
+
+    def _update_running_status(self):
+        n = len(self._engines)
+        self.status_label.setText("● Running" if n <= 1 else f"● Running ({n})")
+        self.status_label.setStyleSheet("color: green; font-weight: bold;")
+
+    def _emit_active_label(self):
+        """Publish what's running for the persistent connection-box indicator:
+        "" when stopped, the module name when one runs, "All Modules" otherwise."""
+        if not self._engines:
+            self.active_simulation_changed.emit("")
+        elif len(self._engines) == 1:
+            self.active_simulation_changed.emit(self._engines[0].module.name)
+        else:
+            self.active_simulation_changed.emit("All Modules")
+
     def _start_module(self):
         if not self.plc.connected:
             QMessageBox.warning(self, "Not Connected", "Please connect to PLC first.")
             return
+        if self._engines:
+            return  # already running
 
         self._save_current_to_list()
         if self._current_index < 0:
             return
 
-        module = self._modules[self._current_index]
-
-        # Pre-run syntax gate — never run a syntax-broken script against the PLC
-        for label, script in (("Init", module.init_script),
-                              ("Loop", module.loop_script)):
-            try:
-                compile(script, "<script>", "exec")
-            except SyntaxError as e:
-                line = e.lineno or 1
-                self._append_log(
-                    f"{label} script syntax error (line {line}): {e.msg}", "error")
-                QMessageBox.warning(
-                    self, "Syntax Error",
-                    f"{label} script has a syntax error on line {line}:\n\n{e.msg}\n\n"
-                    "Fix it before starting the simulation.")
-                return
-
-        self._engine = SimEngine(module, self.plc, log_callback=self._append_log)
-        # Reset the UI if the engine stops itself (script called stop()).
-        # emit is thread-safe — delivers to _on_engine_finished on the main thread.
-        self._engine.on_finished = self.engine_finished.emit
-
-        if module.user_inputs:
-            def get_user_input_values():
-                return self.editor.user_inputs_panel.get_values()
-            self._engine.set_user_input_callback(get_user_input_values)
-
-        if self._engine.start():
-            self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(True)
-            self.status_label.setText("● Running")
-            self.status_label.setStyleSheet("color: green; font-weight: bold;")
+        if self.run_all_cb.isChecked():
+            targets = list(self._modules)
         else:
-            self._engine = None
+            targets = [self._modules[self._current_index]]
+
+        # Pre-run syntax gate for every target — abort all if any fails
+        for module in targets:
+            for label, script in (("Init", module.init_script),
+                                  ("Loop", module.loop_script)):
+                try:
+                    compile(script, "<script>", "exec")
+                except SyntaxError as e:
+                    line = e.lineno or 1
+                    self._append_log(
+                        f"[{module.name}] {label} script syntax error "
+                        f"(line {line}): {e.msg}", "error")
+                    QMessageBox.warning(
+                        self, "Syntax Error",
+                        f"'{module.name}' {label} script has a syntax error on "
+                        f"line {line}:\n\n{e.msg}\n\nFix it before starting.")
+                    return
+
+        selected = self._modules[self._current_index]
+        self._qualify = len(targets) > 1
+        self._stopping = False
+        started = []
+        for module in targets:
+            engine = SimEngine(module, self.plc, log_callback=self._append_log)
+            # on_finished/on_sample fire from the loop thread; the signals queue
+            # them to the main thread. Bind the engine/module per iteration.
+            engine.on_finished = lambda e=engine: self.engine_finished.emit(e)
+            engine.on_sample = (
+                lambda t, s, m=module: self.sample_logged.emit(
+                    t, self._qualify_keys(m, s)))
+            if module.user_inputs:
+                engine.set_user_input_callback(
+                    self._user_input_getter(module, selected))
+            if engine.start():
+                started.append(engine)
+
+        if not started:
             QMessageBox.critical(self, "Start Error",
-                                 "Module failed to start. Check log for details.")
+                                 "No module started. Check log for details.")
+            return
+
+        self._engines = started
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self._update_running_status()
+        self._emit_active_label()
+        self.simulation_started.emit(self.get_trend_channels())
 
     def _stop_module(self):
-        if self._engine:
-            self._engine.stop()
-            self._engine = None
+        self._stopping = True
+        for engine in list(self._engines):
+            engine.stop()
+        self._engines = []
+        self._stopping = False
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status_label.setText("Stopped")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
+        self._emit_active_label()
+        self.simulation_stopped.emit()
 
-    def _on_engine_finished(self):
-        """Reset the UI after the engine stopped itself (script called stop()).
-        Runs on the main thread via the engine_finished signal."""
-        self._engine = None
+    def _on_engine_finished(self, engine):
+        """One engine stopped itself (script stop()). Reset the UI only when the
+        last engine finishes. Runs on the main thread via engine_finished."""
+        if self._stopping:
+            return  # the Stop-button path handles bulk shutdown
+        if engine in self._engines:
+            self._engines.remove(engine)
+        if self._engines:
+            self._update_running_status()
+            self._emit_active_label()
+            return
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status_label.setText("Stopped (by script)")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
+        self._emit_active_label()
+        self.simulation_stopped.emit()
 
     def _append_log(self, msg: str, level: str = "info"):
         color = {"error": "#FF6B6B", "warn": "#FFD93D"}.get(level, "#D4D4D4")
@@ -1032,5 +1148,8 @@ class SimulationTab(QWidget):
 
     def stop_all(self):
         """Called when application closes"""
-        if self._engine and self._engine.is_running:
-            self._engine.stop()
+        self._stopping = True
+        for engine in list(self._engines):
+            if engine.is_running:
+                engine.stop()
+        self._engines = []
