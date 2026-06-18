@@ -132,6 +132,11 @@ class SimEngine:
         self._finalize_lock = threading.Lock()
         self._finalized = False
 
+        # Called as on_sample(elapsed_seconds, {alias: value}) each cycle so a
+        # trend can record data. Fired from the loop thread — keep it thread-safe.
+        self.on_sample: Optional[Callable] = None
+        self._t0 = 0.0
+
         # Shared namespace for scripts - persists across loop iterations
         self._script_ns: Dict = {}
 
@@ -146,6 +151,7 @@ class SimEngine:
             return False
 
         self._log(f"Starting module: {self.module.name}")
+        self._t0 = time.time()
 
         # 1. Enable simulation tags
         if not self._set_sim_tags(True):
@@ -164,6 +170,9 @@ class SimEngine:
                 return False
             # After init, flush any output changes back to PLC
             self._flush_outputs()
+
+        # Emit an initial sample at t≈0 so trends start from the baseline
+        self._emit_sample()
 
         # 4. Start loop thread
         self._running = True
@@ -215,6 +224,33 @@ class SimEngine:
         return {k: v for k, v in self._script_ns.items()
                 if not k.startswith("_")}
 
+    def trendable_aliases(self) -> List[str]:
+        """Alias names a trend can plot: input + output + user-input aliases."""
+        names = [t.alias for t in self.module.input_tags]
+        names += [t.alias for t in self.module.output_tags]
+        names += [u.alias for u in self.module.user_inputs]
+        return names
+
+    def _sample_values(self) -> Dict[str, float]:
+        """Numeric snapshot of the trendable aliases for the current cycle."""
+        sample = {}
+        for alias in self.trendable_aliases():
+            val = self._script_ns.get(alias)
+            if isinstance(val, bool):
+                sample[alias] = 1.0 if val else 0.0
+            elif isinstance(val, (int, float)):
+                sample[alias] = float(val)
+        return sample
+
+    def _emit_sample(self):
+        """Send the current cycle's values to the trend callback (if any)."""
+        if not self.on_sample:
+            return
+        try:
+            self.on_sample(time.time() - self._t0, self._sample_values())
+        except Exception as e:  # pragma: no cover - trend must never break the loop
+            logger.warning(f"on_sample callback failed: {e}")
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -239,6 +275,9 @@ class SimEngine:
             # Flush outputs back to PLC (the final computed values are written
             # even when the script just requested a stop)
             self._flush_outputs()
+
+            # Record a trend sample for this cycle
+            self._emit_sample()
 
             # If the script called stop(), shut down gracefully now
             if self._stop_requested:

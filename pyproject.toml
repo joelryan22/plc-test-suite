@@ -13,6 +13,8 @@ dependencies = [
     "PyQt6>=6.4.0",
     "PyQt6-QScintilla>=2.14",
     "jedi>=0.19",
+    "pyqtgraph>=0.13",
+    "numpy",
 ]
 
 [tool.setuptools.packages.find]

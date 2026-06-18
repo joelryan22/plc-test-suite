@@ -15,6 +15,7 @@ from PyQt6.QtGui import QColor
 from plc_test_suite.plc_connection import PLCConnection
 from plc_test_suite.sim_tab import SimulationTab
 from plc_test_suite.tag_browser import TagBrowserTab
+from plc_test_suite.trend_tab import TrendTab
 
 # Configure logging
 logging.basicConfig(
@@ -71,7 +72,11 @@ class PLCTestSuiteGUI(QMainWindow):
         # Simulation Modules tab (new)
         self.sim_tab = SimulationTab(self.plc)
         tab_widget.addTab(self.sim_tab, "Simulation Modules")
-        
+
+        # Trend tab - live plotting of simulation aliases
+        self.trend_tab = TrendTab(self.sim_tab)
+        tab_widget.addTab(self.trend_tab, "Trend")
+
         # Tag Browser tab
         self.tag_browser_tab = TagBrowserTab(self.plc)
         tab_widget.addTab(self.tag_browser_tab, "Tag Browser")

@@ -67,6 +67,7 @@ plc-test-suite/
 │   ├── plc_connection.py     # PLC communication wrapper
 │   ├── sim_module.py         # SimModule data model + SimEngine
 │   ├── sim_tab.py            # Simulation UI components
+│   ├── trend_tab.py          # Live trend plotting (pyqtgraph)
 │   ├── tag_browser.py        # Tag discovery UI
 │   ├── user_inputs.py        # Interactive control widgets
 │   └── syntax_highlighter.py # Python code syntax highlighting
@@ -252,6 +253,8 @@ finally:
 - [x] Whitelisted `math` / `time` / `random` available in scripts
 - [x] Scripts can end the simulation gracefully via `stop("reason")` (disables sim
       tags and resets the UI, same as the Stop button)
+- [x] Trend tab: live pyqtgraph plot of input/output/user-input aliases, per-channel
+      color, samples logged each sim cycle, persists after stop, save/load reloadable CSV
 - [x] Collapsible execution log
 - [x] Optional heartbeat tag for connection status
 - [x] Error handling (graceful disconnect, protected UDTs)

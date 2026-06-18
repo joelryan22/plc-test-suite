@@ -581,14 +581,19 @@ class ModuleEditorWidget(QWidget):
         self.output_tags_widget.tags_changed.connect(self._refresh_editor_names)
         self._refresh_editor_names()
 
-    def _refresh_editor_names(self):
-        """Push the current set of alias names into both script editors so
-        autocompletion knows about them."""
+    def get_alias_names(self) -> list:
+        """All alias names in the current module: input + output + user inputs."""
         names = []
         names += [e.alias for e in self.input_tags_widget.get_entries()]
         names += [e.alias for e in self.output_tags_widget.get_entries()]
         if self._module and self._module.user_inputs:
             names += [u.alias for u in self._module.user_inputs]
+        return names
+
+    def _refresh_editor_names(self):
+        """Push the current set of alias names into both script editors so
+        autocompletion knows about them."""
+        names = self.get_alias_names()
         self.init_editor.set_known_names(names)
         self.loop_editor.set_known_names(names)
 
@@ -766,6 +771,13 @@ class SimulationTab(QWidget):
     # Emitted (possibly from the engine's worker thread) when the engine stops
     # on its own — e.g. a script called stop(). Queued to the main thread.
     engine_finished = pyqtSignal()
+
+    # Trend-tab integration. simulation_started carries the started SimModule;
+    # sample_logged carries (elapsed_seconds, {alias: value}) each cycle and is
+    # emitted from the engine's worker thread (Qt queues it to the main thread).
+    simulation_started = pyqtSignal(object)
+    simulation_stopped = pyqtSignal()
+    sample_logged = pyqtSignal(float, dict)
 
     def __init__(self, plc, parent=None):
         super().__init__(parent)
@@ -992,6 +1004,9 @@ class SimulationTab(QWidget):
         # Reset the UI if the engine stops itself (script called stop()).
         # emit is thread-safe — delivers to _on_engine_finished on the main thread.
         self._engine.on_finished = self.engine_finished.emit
+        # Forward per-cycle samples to the Trend tab (emitted from the loop
+        # thread; Qt queues the signal to the main thread).
+        self._engine.on_sample = lambda t, s: self.sample_logged.emit(t, s)
 
         if module.user_inputs:
             def get_user_input_values():
@@ -1003,6 +1018,7 @@ class SimulationTab(QWidget):
             self.stop_btn.setEnabled(True)
             self.status_label.setText("● Running")
             self.status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.simulation_started.emit(module)
         else:
             self._engine = None
             QMessageBox.critical(self, "Start Error",
@@ -1016,6 +1032,7 @@ class SimulationTab(QWidget):
         self.stop_btn.setEnabled(False)
         self.status_label.setText("Stopped")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
+        self.simulation_stopped.emit()
 
     def _on_engine_finished(self):
         """Reset the UI after the engine stopped itself (script called stop()).
@@ -1025,6 +1042,7 @@ class SimulationTab(QWidget):
         self.stop_btn.setEnabled(False)
         self.status_label.setText("Stopped (by script)")
         self.status_label.setStyleSheet("color: gray; font-weight: bold;")
+        self.simulation_stopped.emit()
 
     def _append_log(self, msg: str, level: str = "info"):
         color = {"error": "#FF6B6B", "warn": "#FFD93D"}.get(level, "#D4D4D4")
